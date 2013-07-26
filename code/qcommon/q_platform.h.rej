@@ -1,0 +1,20 @@
+--- code/qcommon/q_platform.h	2010-12-20 11:46:04 +0200
++++ code/qcommon/q_platform.h	2010-12-20 11:47:08 +0200
+@@ -75,14 +75,14 @@
+ //================================================================= WIN64/32 ===
+ 
+ #if defined(_WIN64) || defined(__WIN64__)
+-
++#define COMPILER  "gcc"
+ #undef QDECL
+ #define QDECL __cdecl
+ 
+ #if defined( _MSC_VER )
+-#define OS_STRING "win_msvc64"
++#define OS_STRING "windows"
+ #elif defined __MINGW64__
+-#define OS_STRING "win_mingw64"
++#define OS_STRING "windows"
+ #endif
+ 
+ #define ID_INLINE inline

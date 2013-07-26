@@ -1,0 +1,581 @@
+--- Makefile	2010-07-22 06:21:12 +0300
++++ Makefile	2010-12-24 11:42:18 +0200
+@@ -1,12 +1,36 @@
++# ioq3-urt Makefile
++# 
++# Notice local header building is mainly supported on windows, and non local
++# header building for all other
+ #
+-# ioq3 Makefile
+-#
+-# GNU Make required
++# Similarly, some non-default combinations of static vs dynamic libaries may
++# need editing.
+ #
++# There are ioq3-urt related comments next to important definitions such as 
++# USE_CURL
++
++#forced recompilation due to __DATE__ and __TIME__:
++ifneq ($(NOTOUCH),1)
++  $(shell touch -c code/sys/sys_main.c code/qcommon/common.c code/client/cl_console.c)
++endif
++
++ifeq ($(OPENMP),1) # Unused currently
++  CFLAGS += -fopenmp
++endif
+ 
+-COMPILE_PLATFORM=$(shell uname|sed -e s/_.*//|tr '[:upper:]' '[:lower:]')
++ifeq ($(GPROF),1) # Profiling with gprof; for debugging and optimization
++  CFLAGS+= -pg -g
++  LDFLAGS+= -pg
++  IOQ3URTEXTRA += -gprof
++endif	
+ 
+-COMPILE_ARCH=$(shell uname -m | sed -e s/i.86/i386/)
++ifndef COMPILE_PLATFORM 
++  COMPILE_PLATFORM=$(shell uname|sed -e s/_.*//|tr '[:upper:]' '[:lower:]')
++endif
++
++ifndef COMPILE_ARCH
++  COMPILE_ARCH=$(shell uname -m | sed -e s/i.86/i386/)
++endif
+ 
+ ifeq ($(COMPILE_PLATFORM),sunos)
+   # Solaris uname and GNU uname differ
+@@ -18,36 +42,48 @@
+ endif
+ 
+ ifeq ($(COMPILE_PLATFORM),mingw32)
+-  ifeq ($(COMPILE_ARCH),i386)
+-    COMPILE_ARCH=x86
++  #MSYS' uname prints i686 regardless:
++  ifneq ($(CROSS),1) #facilitating (clumsily) cross compilation
++    ifneq ($(shell gcc -v 2>&1 |grep -c x86_64), 0)
++      COMPILE_ARCH=x86_64
++    else
++      COMPILE_ARCH=x86
++    endif
+   endif
+ endif
+ 
+-ifndef BUILD_STANDALONE
+-  BUILD_STANDALONE =
++# required for standalone UrT:
++ifndef BUILD_STANDALONE 
++  BUILD_STANDALONE =1
+ endif
++# the main engine client:
+ ifndef BUILD_CLIENT
+-  BUILD_CLIENT     =
++  BUILD_CLIENT     =1
+ endif
++# unsupported (does it even do anything?):
+ ifndef BUILD_CLIENT_SMP
+-  BUILD_CLIENT_SMP =
++  BUILD_CLIENT_SMP =0
+ endif
++# build the ioq3-urt server; doable but largely untested:
+ ifndef BUILD_SERVER
+-  BUILD_SERVER     =
++  BUILD_SERVER     =0
+ endif
++# unneeded as long as qvms are the only provided:
+ ifndef BUILD_GAME_SO
+-  BUILD_GAME_SO    =
++  BUILD_GAME_SO    =0
+ endif
++# same with previous:
+ ifndef BUILD_GAME_QVM
+-  BUILD_GAME_QVM   =
++  BUILD_GAME_QVM   =0
+ endif
++# irrelevant:
+ ifndef BUILD_MISSIONPACK
+-  BUILD_MISSIONPACK=
++  BUILD_MISSIONPACK=0
+ endif
+ 
+-ifneq ($(PLATFORM),darwin)
+-  BUILD_CLIENT_SMP = 0
+-endif
++#ifneq ($(PLATFORM),darwin)
++#  BUILD_CLIENT_SMP = 0
++#endif
+ 
+ #############################################################################
+ #
+@@ -106,7 +142,7 @@
+ ifndef GENERATE_DEPENDENCIES
+ GENERATE_DEPENDENCIES=1
+ endif
+-
++# an alternative sound system; not required:
+ ifndef USE_OPENAL
+ USE_OPENAL=1
+ endif
+@@ -114,31 +150,32 @@
+ ifndef USE_OPENAL_DLOPEN
+ USE_OPENAL_DLOPEN=1
+ endif
+-
++# This also unables Unicode rendering with FTGL (since it requires Freetype):
++ifndef USE_FREETYPE
++USE_FREETYPE=1
++endif
++# This enables both Autodownloading support and GoogleTranslation (they both 
++# need only this library as an extra):
+ ifndef USE_CURL
+ USE_CURL=1
+ endif
+ 
+ ifndef USE_CURL_DLOPEN
+-  ifeq ($(PLATFORM),mingw32)
+-    USE_CURL_DLOPEN=0
+-  else
+-    USE_CURL_DLOPEN=1
+-  endif
++USE_CURL_DLOPEN=1
+ endif
+-
++# Unused on UrT:
+ ifndef USE_CODEC_VORBIS
+ USE_CODEC_VORBIS=0
+ endif
+-
++# Mumble '3D positioning' support:
+ ifndef USE_MUMBLE
+ USE_MUMBLE=1
+ endif
+-
++# Voice Chat:
+ ifndef USE_VOIP
+ USE_VOIP=1
+ endif
+-
++# Used by VOIP:
+ ifndef USE_INTERNAL_SPEEX
+ USE_INTERNAL_SPEEX=1
+ endif
+@@ -146,19 +183,25 @@
+ ifndef USE_INTERNAL_ZLIB
+ USE_INTERNAL_ZLIB=1
+ endif
+-
++# Mainly supported on Windows; the reverse otherwise:
+ ifndef USE_LOCAL_HEADERS
+-USE_LOCAL_HEADERS=1
++  ifeq ($(COMPILE_PLATFORM),linux)
++    USE_LOCAL_HEADERS=0
++  else
++    USE_LOCAL_HEADERS=1
++  endif
+ endif
+ 
+ ifndef DEBUG_CFLAGS
+-DEBUG_CFLAGS=-g -O0
++  DEBUG_CFLAGS=-g -O0
+ endif
+ 
+ #############################################################################
+ 
+-BD=$(BUILD_DIR)/debug-$(PLATFORM)-$(ARCH)
+-BR=$(BUILD_DIR)/release-$(PLATFORM)-$(ARCH)
++BD=$(BUILD_DIR)/debug-$(PLATFORM)-$(ARCH)$(IOQ3URTEXTRA)
++BR=$(BUILD_DIR)/release-$(PLATFORM)-$(ARCH)$(IOQ3URTEXTRA)
++IOQ3URTDIR=$(MOUNT_DIR)/ioq3-urt
++JSONDIR=$(MOUNT_DIR)/json-c
+ CDIR=$(MOUNT_DIR)/client
+ SDIR=$(MOUNT_DIR)/server
+ RDIR=$(MOUNT_DIR)/renderer
+@@ -183,6 +226,8 @@
+ LOKISETUPDIR=misc/setup
+ NSISDIR=misc/nsis
+ SDLHDIR=$(MOUNT_DIR)/SDL12
++FTGLHDIR=$(MOUNT_DIR)/FTGL
++FREETYPEHDIR=$(MOUNT_DIR)/FT2
+ LIBSDIR=$(MOUNT_DIR)/libs
+ TEMPDIR=/tmp
+ 
+@@ -282,21 +329,17 @@
+     CLIENT_CFLAGS += -DUSE_CODEC_VORBIS
+   endif
+ 
+-  OPTIMIZEVM = -O3 -funroll-loops -fomit-frame-pointer
+-  OPTIMIZE = $(OPTIMIZEVM) -ffast-math
++  OPTIMIZEVM = -O3
++  OPTIMIZE = $(OPTIMIZEVM) 
+ 
+   ifeq ($(ARCH),x86_64)
+-    OPTIMIZEVM = -O3 -fomit-frame-pointer -funroll-loops \
+-      -falign-loops=2 -falign-jumps=2 -falign-functions=2 \
+-      -fstrength-reduce
+-    OPTIMIZE = $(OPTIMIZEVM) -ffast-math
++    OPTIMIZEVM = -O3
++    OPTIMIZE = $(OPTIMIZEVM) 
+     HAVE_VM_COMPILED = true
+   else
+   ifeq ($(ARCH),i386)
+-    OPTIMIZEVM = -O3 -march=i586 -fomit-frame-pointer \
+-      -funroll-loops -falign-loops=2 -falign-jumps=2 \
+-      -falign-functions=2 -fstrength-reduce
+-    OPTIMIZE = $(OPTIMIZEVM) -ffast-math
++    OPTIMIZEVM = -O3 -mmmx
++    OPTIMIZE = $(OPTIMIZEVM)
+     HAVE_VM_COMPILED=true
+   else
+   ifeq ($(ARCH),ppc)
+@@ -353,7 +400,10 @@
+   endif
+ 
+   ifeq ($(USE_LOCAL_HEADERS),1)
+-    CLIENT_CFLAGS += -I$(SDLHDIR)/include
++    CLIENT_CFLAGS += -I$(SDLHDIR)/include -I$(FREETYPEHDIR)/include \
++		     -I$(FTGLHDIR)/include
++    
++    SERVER_CFLAGS += -I$(SDLHDIR)/include
+   endif
+ 
+   ifeq ($(ARCH),i386)
+@@ -414,6 +464,10 @@
+     endif
+   endif
+ 
++  ifeq ($(USE_FREETYPE),1)
++    CLIENT_LIBS += -lfreetype #-lftgl #ioq3-urt: dynamic is default for now
++  endif
++
+   ifeq ($(USE_CODEC_VORBIS),1)
+     CLIENT_CFLAGS += -DUSE_CODEC_VORBIS
+     CLIENT_LIBS += -lvorbisfile -lvorbis -logg
+@@ -422,7 +476,8 @@
+   BASE_CFLAGS += -D_THREAD_SAFE=1
+ 
+   ifeq ($(USE_LOCAL_HEADERS),1)
+-    BASE_CFLAGS += -I$(SDLHDIR)/include
++    BASE_CFLAGS += -I$(SDLHDIR)/include -I$(FREETYPEHDIR)/include \
++		   -I$(FTGLHDIR)/include
+   endif
+ 
+   # We copy sdlmain before ranlib'ing it so that subversion doesn't think
+@@ -467,7 +522,7 @@
+   endif
+ 
+   BASE_CFLAGS = -Wall -fno-strict-aliasing -Wimplicit -Wstrict-prototypes \
+-    -DUSE_ICON
++	       	-DUSE_ICON
+   CLIENT_CFLAGS =
+   SERVER_CFLAGS =
+ 
+@@ -482,53 +537,72 @@
+     ifeq ($(USE_OPENAL_DLOPEN),1)
+       CLIENT_CFLAGS += -DUSE_OPENAL_DLOPEN
+     else
+-      CLIENT_LDFLAGS += $(OPENAL_LDFLAGS)
++      CLIENT_LDFLAGS += $(OPENAL_LDFLAGS) 
+     endif
+   endif
+ 
+   ifeq ($(USE_CODEC_VORBIS),1)
+     CLIENT_CFLAGS += -DUSE_CODEC_VORBIS
+   endif
+-
+-  ifeq ($(ARCH),x64)
+-    OPTIMIZEVM = -O3 -fno-omit-frame-pointer \
+-      -falign-loops=2 -funroll-loops -falign-jumps=2 -falign-functions=2 \
+-      -fstrength-reduce
+-    OPTIMIZE = $(OPTIMIZEVM) --fast-math
+-    HAVE_VM_COMPILED = true
++ 
++  ifeq ($(ARCH),x86_64)
++    OPTIMIZEVM = -O3
+   endif
+   ifeq ($(ARCH),x86)
+-    OPTIMIZEVM = -O3 -march=i586 -fno-omit-frame-pointer \
+-      -falign-loops=2 -funroll-loops -falign-jumps=2 -falign-functions=2 \
+-      -fstrength-reduce
+-    OPTIMIZE = $(OPTIMIZEVM) -ffast-math
+-    HAVE_VM_COMPILED = true
++    ifeq ($(ONLYMMX),1)
++      OPTIMIZEVM = -O3 -mmmx
++      IOQ3URTEXTRA = -onlymmx
++    else
++      OPTIMIZEVM = -O3 -msse -msse2 -mfpmath=sse
++    endif
++  endif
++
++  ifeq ($(PROFILEGEN), 1)
++    OPTIMIZEVM += -fprofile-generate
++  else 
++    ifeq ($(PROFILEUSE), 1)
++      OPTIMIZEVM += -fprofile-use
++    endif
+   endif
+ 
++  OPTIMIZE = $(OPTIMIZEVM) 
++  HAVE_VM_COMPILED = true
++
+   SHLIBEXT=dll
+   SHLIBCFLAGS=
+   SHLIBLDFLAGS=-shared $(LDFLAGS)
+ 
+   BINEXT=.exe
+ 
+-  LIBS= -lws2_32 -lwinmm -lpsapi
++  LIBS= -lws2_32 -lwinmm -lpsapi -ldxguid
+   CLIENT_LDFLAGS = -mwindows
++  ifeq ($(PROFILEGEN), 1)
++    CLIENT_LDFLAGS += -fprofile-generate
++  endif
+   CLIENT_LIBS = -lgdi32 -lole32 -lopengl32
+ 
+   ifeq ($(USE_CURL),1)
+     CLIENT_CFLAGS += -DUSE_CURL
++    
+     CLIENT_CFLAGS += $(CURL_CFLAGS)
+     ifneq ($(USE_CURL_DLOPEN),1)
+       ifeq ($(USE_LOCAL_HEADERS),1)
+         CLIENT_CFLAGS += -DCURL_STATICLIB
+-        ifeq ($(ARCH),x64)
+-	  CLIENT_LIBS += $(LIBSDIR)/win64/libcurl.a
+-	else
+-          CLIENT_LIBS += $(LIBSDIR)/win32/libcurl.a
++        ifeq ($(ARCH),x86_64)
++          CLIENT_LIBS += $(LIBSDIR)/win64/libcurl.a
++        else
++          CLIENT_LIBS += $(LIBSDIR)/win32/libcurl_mmx.a
+         endif
+       else
+         CLIENT_LIBS += $(CURL_LIBS)
+       endif
++    else
++      CLIENT_CFLAGS += -DUSE_CURL_DLOPEN
++      ifeq ($(ARCH),x86_64)
++        #CLIENT_LIBS += $(LIBSDIR)/win64/libcurl.dll.a
++      else
++        #CLIENT_LIBS += $(LIBSDIR)/win32/libcurl.dll_mmx.a #not needed?
++      endif
+     endif
+   endif
+ 
+@@ -543,24 +617,41 @@
+     BASE_CFLAGS += -m64
+   endif
+ 
++  ifeq ($(USE_FREETYPE),1)
++    ifeq ($(USE_LOCAL_HEADERS),1)
++      CLIENT_CFLAGS += -I$(FTGLHDIR)/include -I$(FREETYPEHDIR)/include
++      ifeq ($(ARCH),x86_64)
++        CLIENT_LIBS += $(LIBSDIR)/win64/libfreetype.dll.a
++	#$(LIBSDIR)/win64/libftgl.dll.a #ioq3-urt: dynamic is default for now
++                       
++      else
++        CLIENT_LIBS += $(LIBSDIR)/win32/libfreetype.dll.a 
++	#$(LIBSDIR)/win32/libftgl.dll.a  #ioq3-urt: dyn. is default for now
++      endif
++    else
++      CLIENT_LIBS += -lfreetype #-lftgl #ioq3-urt: dynamic is default for now
++    endif
++  endif
++
+   # libmingw32 must be linked before libSDLmain
+   CLIENT_LIBS += -lmingw32
+   ifeq ($(USE_LOCAL_HEADERS),1)
+-    CLIENT_CFLAGS += -I$(SDLHDIR)/include
++    CLIENT_CFLAGS += -I$(SDLHDIR)/include 
++    SERVER_CFLAGS += -I$(SDLHDIR)/include
+     ifeq ($(ARCH), x86)
+-    CLIENT_LIBS += $(LIBSDIR)/win32/libSDLmain.a \
+-                      $(LIBSDIR)/win32/libSDL.dll.a
++      CLIENT_LIBS += $(LIBSDIR)/win32/libSDLmain_mmx.a \
++                     $(LIBSDIR)/win32/libSDL.dll_mmx.a  
+     else
+     CLIENT_LIBS += $(LIBSDIR)/win64/libSDLmain.a \
+-                      $(LIBSDIR)/win64/libSDL.dll.a \
+-                      $(LIBSDIR)/win64/libSDL.a
++                   $(LIBSDIR)/win64/libSDL.dll.a \
++
+     endif
+   else
+     CLIENT_CFLAGS += $(SDL_CFLAGS)
+     CLIENT_LIBS += $(SDL_LIBS)
+   endif
+ 
+-  BUILD_CLIENT_SMP = 0
++  #BUILD_CLIENT_SMP = 0
+ 
+ else # ifeq mingw32
+ 
+@@ -592,6 +683,10 @@
+   CLIENT_LIBS =
+ 
+   CLIENT_LIBS += $(SDL_LIBS) -lGL
++ 
++  ifeq ($(USE_FREETYPE),1)
++    CLIENT_LIBS += -lfreetype #-lftgl #ioq3-urt: dynamic is default for now
++  endif
+ 
+   # optional features/libraries
+   ifeq ($(USE_OPENAL),1)
+@@ -676,6 +771,10 @@
+   CLIENT_LIBS =
+ 
+   CLIENT_LIBS += $(SDL_LIBS) -lGL
++  
++  ifeq ($(USE_FREETYPE),1)
++    CLIENT_LIBS += -lfreetype #-lftgl #ioq3-urt: dynamic is default for now
++  endif
+ 
+   ifeq ($(USE_OPENAL),1)
+     ifneq ($(USE_OPENAL_DLOPEN),1)
+@@ -894,6 +993,7 @@
+   SERVER_CFLAGS += -DUSE_VOIP
+   ifeq ($(USE_INTERNAL_SPEEX),1)
+     CLIENT_CFLAGS += -DFLOATING_POINT -DUSE_ALLOCA -I$(SPEEXDIR)/include
++    SERVER_CFLAGS += -I$(SPEEXDIR)/include
+   else
+     CLIENT_LIBS += -lspeex -lspeexdsp
+   endif
+@@ -901,7 +1001,9 @@
+ 
+ ifeq ($(USE_INTERNAL_ZLIB),1)
+   BASE_CFLAGS += -DNO_GZIP
+-  BASE_CFLAGS += -I$(ZDIR)
++  ifneq ($(USE_LOCAL_HEADERS),1)
++    BASE_CFLAGS += -I$(ZDIR)
++  endif
+ else
+   LIBS += -lz
+ endif
+@@ -915,7 +1017,11 @@
+ endif
+ 
+ ifeq ($(BUILD_STANDALONE),1)
+-  BASE_CFLAGS += -DSTANDALONE
++  BASE_CFLAGS += -DSTANDALONE 
++endif
++
++ifeq ($(USE_FREETYPE),1)
++  BASE_CFLAGS += -DBUILD_FREETYPE
+ endif
+ 
+ ifeq ($(GENERATE_DEPENDENCIES),1)
+@@ -1304,6 +1410,42 @@
+ #############################################################################
+ 
+ Q3OBJ = \
++  $(B)/client/ioq3-urt.o \
++  $(B)/client/ioq3-urt_Autotimenudge.o \
++  $(B)/client/ioq3-urt_Blank.o \
++  $(B)/client/ioq3-urt_Clock.o \
++  $(B)/client/ioq3-urt_DNSworkaround.o \
++  $(B)/client/ioq3-urt_FTGL.o \
++  $(B)/client/ioq3-urt_Init.o \
++  $(B)/client/ioq3-urt_InitTimers.o \
++  $(B)/client/ioq3-urt_KeyRepeat.o \
++  $(B)/client/ioq3-urt_Microgranularity.o \
++  $(B)/client/ioq3-urt_MotionBlur.o \
++  $(B)/client/ioq3-urt_OnePK3.o \
++  $(B)/client/ioq3-urt_Precache.o \
++  $(B)/client/ioq3-urt_Quiet.o \
++  $(B)/client/ioq3-urt_RawMouse.o \
++  $(B)/client/ioq3-urt_Rebind.o \
++  $(B)/client/ioq3-urt_ReconnectWorkaround.o \
++  $(B)/client/ioq3-urt_SCR.o \
++  $(B)/client/ioq3-urt_SetEnv.o \
++  $(B)/client/ioq3-urt_Sleep.o \
++  $(B)/client/ioq3-urt_Stats.o \
++  $(B)/client/ioq3-urt_Stopwatch.o \
++  $(B)/client/ioq3-urt_Sysexec.o \
++  $(B)/client/ioq3-urt_Teleportation.o \
++  $(B)/client/ioq3-urt_Translation.o \
++  $(B)/client/ioq3-urt_Unicode.o \
++  $(B)/client/ioq3-urt_UTradio.o \
++  $(B)/client/ioq3-urt_Uptime.o \
++  $(B)/client/ioq3-urt_ZoomSensitivity.o \
++  $(B)/client/arraylist.o \
++  $(B)/client/json_object.o \
++  $(B)/client/json_util.o \
++  $(B)/client/printbuf.o \
++  $(B)/client/json_tokener.o \
++  $(B)/client/linkhash.o \
++  $(B)/client/snd_dmahd.o \
+   $(B)/client/cl_cgame.o \
+   $(B)/client/cl_cin.o \
+   $(B)/client/cl_console.o \
+@@ -1466,7 +1608,6 @@
+   $(B)/client/sdl_input.o \
+   $(B)/client/sdl_snd.o \
+   \
+-  $(B)/client/con_passive.o \
+   $(B)/client/con_log.o \
+   $(B)/client/sys_main.o
+ 
+@@ -1554,9 +1695,6 @@
+   ifeq ($(ARCH),amd64)
+     Q3OBJ += $(B)/client/vm_x86_64.o $(B)/client/vm_x86_64_assembler.o
+   endif
+-  ifeq ($(ARCH),x64)
+-    Q3OBJ += $(B)/client/vm_x86_64.o $(B)/client/vm_x86_64_assembler.o
+-  endif
+   ifeq ($(ARCH),ppc)
+     Q3OBJ += $(B)/client/vm_powerpc.o $(B)/client/vm_powerpc_asm.o
+   endif
+@@ -1571,10 +1709,13 @@
+ ifeq ($(PLATFORM),mingw32)
+   Q3OBJ += \
+     $(B)/client/win_resource.o \
+-    $(B)/client/sys_win32.o
++    $(B)/client/sys_win32.o \
++    $(B)/client/sam.o\
++    $(B)/client/con_passive.o
+ else
+   Q3OBJ += \
+-    $(B)/client/sys_unix.o
++    $(B)/client/sys_unix.o\
++    $(B)/client/con_tty.o
+ endif
+ 
+ ifeq ($(PLATFORM),darwin)
+@@ -1620,6 +1761,13 @@
+ #############################################################################
+ 
+ Q3DOBJ = \
++  $(B)/ded/ioq3-urt.o \
++  $(B)/ded/ioq3-urt_Init.o \
++  $(B)/ded/ioq3-urt_InitTimers.o \
++  $(B)/ded/ioq3-urt_Microgranularity.o \
++  $(B)/ded/ioq3-urt_Quiet.o \
++  $(B)/ded/ioq3-urt_SetEnv.o \
++  $(B)/ded/ioq3-urt_Sysexec.o \
+   $(B)/ded/sv_bot.o \
+   $(B)/ded/sv_client.o \
+   $(B)/ded/sv_ccmds.o \
+@@ -1725,9 +1873,6 @@
+   ifeq ($(ARCH),amd64)
+     Q3DOBJ += $(B)/ded/vm_x86_64.o $(B)/ded/vm_x86_64_assembler.o
+   endif
+-  ifeq ($(ARCH),x64)
+-    Q3DOBJ += $(B)/ded/vm_x86_64.o $(B)/ded/vm_x86_64_assembler.o
+-  endif
+   ifeq ($(ARCH),ppc)
+     Q3DOBJ += $(B)/ded/vm_powerpc.o $(B)/ded/vm_powerpc_asm.o
+   endif
+@@ -2100,12 +2251,18 @@
+ $(B)/ded/%.o: $(ASMDIR)/%.s
+ 	$(DO_AS)
+ 
++$(B)/ded/%.o: $(CDIR)/%.c
++	$(DO_DED_CC)
++
+ $(B)/ded/%.o: $(SDIR)/%.c
+ 	$(DO_DED_CC)
+ 
+ $(B)/ded/%.o: $(CMDIR)/%.c
+ 	$(DO_DED_CC)
+ 
++$(B)/ded/%.o: $(IOQ3URTDIR)/%.c
++	$(DO_DED_CC)
++
+ $(B)/ded/%.o: $(ZDIR)/%.c
+ 	$(DO_DED_CC)
+ 
